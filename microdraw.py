@@ -49,7 +49,7 @@ def download_dataset_definition(source):
       "project": prj
       }
 
-def download_all_regions_from_dataset_slice(source, project, slce, token):
+def download_all_regions_from_dataset_slice(source, project, slce, token, backups=False):
   '''Download all regions in a dataset slice'''
 
   url = "https://microdraw.pasteur.fr/api?source=%s&project=%s&slice=%s&token=%s"%(
@@ -57,6 +57,10 @@ def download_all_regions_from_dataset_slice(source, project, slce, token):
       project,
       slce,
       token)
+
+  if backups is True:
+    url = url + "&backup"
+
   res = urlreq.urlopen(url)
   txt = res.read()
   conts = json.loads(txt)
