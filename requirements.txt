@@ -23,7 +23,6 @@ six==1.15.0
 smmap2==2.0.5
 svgpathtools==1.4.1
 svgwrite==1.4.1
-tifffile==2021.2.1
 torch==1.7.1
 tqdm==4.56.0
 typing-extensions==3.7.4.3
