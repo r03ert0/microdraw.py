@@ -1,0 +1,35 @@
+bezier==2020.5.19
+certifi==2020.12.5
+cycler==0.10.0
+decorator==4.4.2
+distro==1.4.0
+gitdb2==2.0.5
+GitPython==2.1.11
+imageio==2.9.0
+kiwisolver==1.3.1
+matplotlib==3.3.4
+# Editable install with no version control (microdraw==0.0.1)
+-e /Users/roberto/Documents/2020_06Giant_anteater/bin/microdraw
+networkx==2.5
+nibabel==3.2.1
+numpy==1.20.0
+packaging==20.9
+Pillow==8.1.0
+pyclipper==1.2.1
+pyparsing==2.4.7
+PyQt5==5.12
+PyQt5-sip==4.19.14
+python-dateutil==2.8.1
+PyWavelets==1.1.1
+scikit-image==0.18.1
+scipy==1.6.0
+Shapely==1.7.1
+six==1.15.0
+smmap2==2.0.5
+svgpathtools==1.4.1
+svgwrite==1.4.1
+tifffile==2021.2.1
+torch==1.7.1
+tqdm==4.56.0
+typing-extensions==3.7.4.3
+yapf==0.26.0
