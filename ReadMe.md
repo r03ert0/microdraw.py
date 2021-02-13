@@ -1,4 +1,5 @@
 # microdraw.py
+Python package for working with microdraw
 
 Import using
 
