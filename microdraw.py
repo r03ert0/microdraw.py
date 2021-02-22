@@ -132,7 +132,8 @@ def draw_all_dataset(dataset, ncol=13, width=800, alpha=0.5, path=None):
     plt.savefig(path)
 
 def dataset_as_volume(dataset):
-  '''get dataset as a volume'''
+  '''combine all contours into a single mesh. This mesh does not have
+  triangles, only contours.'''
 
   verts = []
   eds = []
@@ -145,20 +146,22 @@ def dataset_as_volume(dataset):
       neds = len(eds)
   return verts, eds
 
-def save_dataset_as_text_mesh(dataset, path):
+def save_dataset_as_text_mesh(dataset, path, voxdim=[0.1,0.1,1.25]):
   '''save dataset as a text mesh'''
 
   verts, eds = dataset_as_volume(dataset)
   mesh = "%i 0 %i"%(len(verts), len(eds))
-  verts_str = "\n".join(["%f %f %f"%(x*0.1, y*0.1, z*1.25) for x, y, z in verts])
-  eds_str = "\n".join(["%i %i"%(i, j) for i, j in eds])
+  verts_str = "\n".join(
+      "%f %f %f" % (x * voxdim[0], y * voxdim[1], z * voxdim[2])
+      for x, y, z in verts)
+  eds_str = "\n".join("%i %i"%(i, j) for i, j in eds)
   mesh = "\n".join((mesh, verts_str, eds_str))
 
   file = open(path, 'w')
   file.write(mesh)
 
 def dataset_to_nifti(dataset, voxdim=[0.1, 0.1, 1.25], region_name=None):
-  '''convert dataset to nifti volume'''
+  '''convert dataset to nifti volume. Returns a nifti object'''
 
   verts, _ = dataset_as_volume(dataset)
   vmin, vmax = np.min(verts, axis=0), np.max(verts, axis=0)
@@ -170,7 +173,7 @@ def dataset_to_nifti(dataset, voxdim=[0.1, 0.1, 1.25], region_name=None):
   for slce in range(dataset["numSlices"]):
     regions = get_regions_from_dataset_slice(dataset["slices"][slce])
     for name, region in regions:
-      if region_name is None or (region_name is not None and name == region_name):
+      if region_name is None or name in region_name:
         try:
           rows, cols = polygon(region[:, 0]-vmin[0], region[:, 1]-vmin[1], img.shape)
           img[rows, cols, slce] = 255
@@ -182,9 +185,7 @@ def dataset_to_nifti(dataset, voxdim=[0.1, 0.1, 1.25], region_name=None):
   affine[0, 0] = voxdim[0]
   affine[1, 1] = voxdim[1]
   affine[2, 2] = voxdim[2]
-  nii = nib.Nifti1Image(img, affine=affine)
-
-  return nii
+  return nib.Nifti1Image(img, affine=affine)
 
 def save_dataset_as_nifti(dataset, path, voxdim=[0.1, 0.1, 1.25], region_name=None):
   '''save dataset as a nifti volume'''
@@ -239,55 +240,56 @@ def raw_contour(v, f, x):
     (0, 1 or 2), and the distance from the beginning of the edge.
     '''
     EPS = sys.float_info.epsilon
-    con = []
-    verpc = []
+    contour = []
+    vert_point_and_coord = []
     for i in range(len(f)):
         a,b,c = f[i]
         ed = []
-        co = []
+        tri_based_coord = []
 
         if np.abs(v[a,2]-x)<EPS:
             ed.append(v[a])
-            co.append((i,0,0)) # triangle i, edge #0, at the beginning
+            tri_based_coord.append((i,0,0)) # triangle i, edge #0, at the beginning
         if np.abs(v[b,2]-x)<EPS:
             ed.append(v[b])
-            co.append((i,1,0)) # triangle i, edge #1, at the beginning
+            tri_based_coord.append((i,1,0)) # triangle i, edge #1, at the beginning
         if np.abs(v[c,2]-x)<EPS:
             ed.append(v[c])
-            co.append((i,2,0)) # triangle i, edge #2, at the beginning
+            tri_based_coord.append((i,2,0)) # triangle i, edge #2, at the beginning
         if (v[a,2]-x)*(v[b,2]-x) < 0:
             p,t = interp(v[a,:],v[b,:],x)
             ed.append(p)
-            co.append((i,0,t)) # triangle i, edge #0, t% of the length
+            tri_based_coord.append((i,0,t)) # triangle i, edge #0, t% of the length
         if (v[b,2]-x)*(v[c,2]-x) < 0:
             p,t = interp(v[b,:],v[c,:],x)
             ed.append(p)
-            co.append((i,1,t)) # triangle i, edge #1, t% of the length
+            tri_based_coord.append((i,1,t)) # triangle i, edge #1, t% of the length
         if (v[c,2]-x)*(v[a,2]-x) < 0:
             p,t=interp(v[c,:],v[a,:],x)
             ed.append(p)
-            co.append((i,2,t)) # triangle i, edge #2, t% of the length
+            tri_based_coord.append((i,2,t)) # triangle i, edge #2, t% of the length
 
         if len(ed) == 2:
-            n = len(verpc)
-            con.append((n, n+1))
-            verpc.append((ed[0],co[0]))
-            verpc.append((ed[1],co[1]))
+            n = len(vert_point_and_coord)
+            contour.append((n, n+1))
+            vert_point_and_coord.append((ed[0],tri_based_coord[0]))
+            vert_point_and_coord.append((ed[1],tri_based_coord[1]))
         elif len(ed)>0:
-            print("WEIRD ED", ed,co)
+            print("WEIRD EDGE", ed, tri_based_coord)
 
-    con=np.array(con)
-    return (verpc, con)
+    contour=np.array(contour)
+    return (vert_point_and_coord, contour)
 
-def continuous_contour(verpc, con):
+def no_duplicates_contour(vert_point_and_coord, contour):
     '''
-    Remove duplicate vertices from the contour given by vertices ver
-    and edges con. The indices in con are re-indexed accordingly.
+    Remove duplicate vertices from the contour given by vertices
+    `vert_point_and_coord` and edges in `contour`. The indices in
+    `contour` are re-indexed accordingly.
     '''
     # distance from each point to the others
-    ver = np.zeros((len(verpc),3))
-    for i in range(len(verpc)):
-        ver[i,:] = verpc[i][0]
+    ver = np.zeros((len(vert_point_and_coord),3))
+    for i in range(len(vert_point_and_coord)):
+        ver[i,:] = vert_point_and_coord[i][0]
     m = distance_matrix(ver, ver)
 
     # set the diagonal to a large number
@@ -300,27 +302,27 @@ def continuous_contour(verpc, con):
 
     # make a list of unique vertices and a look-up table
     n=0
-    uverpc = []
+    unique_vert_point_and_coord = []
     for i in range(len(ver)):
         if i<closest[i]:
-            uverpc.append((ver[i],verpc[i][1]))
+            unique_vert_point_and_coord.append((ver[i],vert_point_and_coord[i][1]))
             lut[i] = n
             lut[closest[i]] = n
             n+=1
 
     # re-index the edges to refer to the new list of unique vertices
-    for i in range(len(con)):
-        con[i] = (lut[con[i,0]], lut[con[i,1]])
+    for i in range(len(contour)):
+        contour[i] = (lut[contour[i,0]], lut[contour[i,1]])
     
-    return (uverpc, con)
+    return (unique_vert_point_and_coord, contour)
 
-def sort_contours(co):
+def continuous_contours(edge_soup):
     '''
     Obtain contiuous lines from the unordered list of edges
-    in co. Returns an array of lines where each element is a
+    in edge_soup. Returns an array of lines where each element is a
     continuous line composed of string of neighbouring vertices
     '''
-    co1=co.copy()
+    co1=edge_soup.copy()
     lines = []
     while True:
         line = []
@@ -348,25 +350,34 @@ def sort_contours(co):
             break
     return lines
 
-def slice_mesh(v, f, x, min_contour_length=10):
+def slice_mesh(v, f, z, min_contour_length=10):
     '''
     Slices the mesh of vertices v and faces f with the plane
-    of last coordinate x. Returns a list of unique vertices,
-    their coordinates relative to the mesh,
-    a list of edges, and a list of continuous lines.
+    of given z coordinate. Returns:
+    * unique_verts_point_and_coord: a list of unique vertices,
+    * mesh_relative_vertex_coords: their coordinates relative to the
+      mesh. Each row has 3 values: index of the mesh triangle that
+      was sliced, index of the edge within that triangle, position of
+      the vertex within that edge. The value of the position of the
+      vertex within the edge is 0 if the vertex is at the beginning of
+      the edge, and 1 if it is at the end.
+    * edges: a list of edges,
+    * lines: and a list of continuous lines.
     '''
-    ver, con = raw_contour(v, f, x)
-    if len(con)<min_contour_length:
+    raw_verts, raw_cont = raw_contour(v, f, z)
+    if len(raw_cont)<min_contour_length:
         return None,None,None,None
-    uverpc, ccon = continuous_contour(ver, con)
 
-    cons = sort_contours(ccon)
-    uver = np.zeros((len(uverpc),3))
-    vercoords = []
-    for i in range(len(uverpc)):
-        uver[i,:] = uverpc[i][0]
-        vercoords.append(uverpc[i][1])
-    return uver, vercoords, ccon, cons
+    unique_verts_point_and_coord, edges = no_duplicates_contour(raw_verts, raw_cont)
+
+    lines = [line for line in continuous_contours(edges) if len(line)>=min_contour_length]
+
+    unique_verts = np.zeros((len(unique_verts_point_and_coord),3))
+    mesh_relative_vertex_coords = []
+    for i in range(len(unique_verts_point_and_coord)):
+        unique_verts[i,:] = unique_verts_point_and_coord[i][0]
+        mesh_relative_vertex_coords.append(unique_verts_point_and_coord[i][1])
+    return unique_verts, mesh_relative_vertex_coords, edges, lines
 
 def scale_contours_to_image(v, width, height, scale_yz):
     s = [[ve[0]/scale_yz,height-ve[1]/scale_yz] for ve in v]
@@ -492,25 +503,23 @@ def convert_polygons_to_microdraw_json(lines, name, rgb):
     return text
 
 def icp_step(mov, ref):
-    out = []
-    for pt in mov:
-        out.append(nearest_points(Polygon(ref),Point(pt))[0].coords[0])
-    out = np.array(out)
-    oout=Polygon(out).centroid.coords[0]
-    omov=Polygon(mov).centroid.coords[0]
-    C = np.zeros([2,2])
-    for i in range(0,len(mov)):
-        V1 = np.array([mov[i]-omov])
-        V2 = np.array([out[i]-oout])
-        C = C + V1.T*V2
-    U,_,V=np.linalg.svd(C)
-    R=U.dot(V)
-    t=omov-R.dot(oout)
-    mov = mov.dot(R)
-    mov = mov - t
-    dist = np.arccos((np.trace(R)-1)/2.0)
-    dist = dist + np.linalg.norm(t)
-    return mov, dist
+  out = [nearest_points(Polygon(ref),Point(pt))[0].coords[0] for pt in mov]
+  out = np.array(out)
+  oout=Polygon(out).centroid.coords[0]
+  omov=Polygon(mov).centroid.coords[0]
+  C = np.zeros([2,2])
+  for i in range(len(mov)):
+    V1 = np.array([mov[i]-omov])
+    V2 = np.array([out[i]-oout])
+    C = C + V1.T*V2
+  U,_,V=np.linalg.svd(C)
+  R=U.dot(V)
+  t=omov-R.dot(oout)
+  mov = mov.dot(R)
+  mov = mov - t
+  dist = np.arccos((np.trace(R)-1)/2.0)
+  dist = dist + np.linalg.norm(t)
+  return mov, dist
 
 def icp(ref, mov):
     maxiter=100
@@ -529,7 +538,7 @@ def icp(ref, mov):
     print("final distance:", diff, "(after", i, "iterations)")
     return mov, diff, i
 
-def find_contour_correspondences(manual, auto):
+def find_contour_correspondences(manual, auto, min_pct=0.7, max_pct=1.4):
     malen = len(manual)
     aulen = len(auto)
     m = np.ones((malen,aulen))*(-1)
@@ -540,13 +549,30 @@ def find_contour_correspondences(manual, auto):
             polb = Polygon(auto[j]).convex_hull
             areaa = pola.area
             areab = polb.area
-            areaab = pola.intersection(polb).area
-            if areaab>0:
-                if areaa/areaab<0.7 or areab/areaab<0.7 or areaa/areaab>1.4 or areab/areaab>1.4:
-                    areaab = -1
-            else:
-                areaab = -1
-            m[i,j] = areaab
+            areaaandb = pola.intersection(polb).area
+            areaaorb = pola.union(polb).area
+
+            overlap = areaaandb/areaaorb
+            if overlap < min_pct:
+                overlap = -1
+            m[i,j] = overlap
+
+            # if areaaandb>0:
+            #     if ( areaa/areaaandb<min_pct
+            #         or areab/areaaandb<min_pct
+            #         or areaa/areaaandb>max_pct
+            #         or areab/areaaandb>max_pct ):
+            #         print(
+            #             areaa,
+            #             areab,
+            #             areaaandb,
+            #             areaa/areaaandb,
+            #             areab/areaaandb
+            #         )
+            #         areaaandb = -1
+            # else:
+            #     areaaandb = -1
+            # m[i,j] = areaaandb
     corresp = np.argmax(m.T,axis=0)
     for i,val in enumerate(corresp):
         if m[i,val] == -1:
