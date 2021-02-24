@@ -49,10 +49,13 @@ def download_dataset_definition(source):
       "project": prj
       }
 
-def download_all_regions_from_dataset_slice(source, project, slce, token, backups=False):
+def download_all_regions_from_dataset_slice(
+    source, project, slce, token,
+    backups=False,
+    microdraw_url="https://microdraw.pasteur.fr"):
   '''Download all regions in a dataset slice'''
 
-  url = "https://microdraw.pasteur.fr/api?source=%s&project=%s&slice=%s&token=%s"%(
+  url = microdraw_url + "/api?source=%s&project=%s&slice=%s&token=%s"%(
       source,
       project,
       slce,
@@ -67,13 +70,15 @@ def download_all_regions_from_dataset_slice(source, project, slce, token, backup
 
   return conts
 
-def download_all_regions_from_dataset(source, project, token):
+def download_all_regions_from_dataset(
+    source, project, token,
+    microdraw_url="https://microdraw.pasteur.fr"):
   '''Download all regions in all slices in a dataset'''
 
   dataset = download_dataset_definition(source)
   dataset["slices"] = []
   for i in tqdm(range(dataset["numSlices"])):
-    dataset["slices"].append(download_all_regions_from_dataset_slice(source, project, i, token))
+    dataset["slices"].append(download_all_regions_from_dataset_slice(source, project, i, token, microdraw_url=microdraw_url))
   return dataset
 
 def get_points_from_segment(seg):
@@ -100,16 +105,66 @@ def get_regions_from_dataset_slice(dataset):
     if path_type == "Path" and 'segments' in region['annotation']['path'][1]:
       seg = np.asfortranarray(region['annotation']['path'][1]['segments'])
       points = get_points_from_segment(seg)
-      regions.append((name, np.array(points)))
+      regions.append((name, np.array(points),0))
     elif path_type == "CompoundPath":
       children = region['annotation']['path'][1]['children']
-      for child in children:
+      for children_number,child in enumerate(children):
         if 'segments' in child[1]:
           segments = [np.asfortranarray(child[1]['segments'])]
           for seg in segments:
             points = get_points_from_segment(seg)
-            regions.append((name, np.array(points)))
+            regions.append((name, np.array(points), children_number))
   return regions
+
+def find_compound_regions(regions):
+  '''combine regions into compound regions'''
+  compound_regions = []
+  i=0
+  while i < len(regions):
+    _, region, _ = regions[i]
+
+    # skip garbage at the begining
+    while len(region)<3 and i<len(regions)-1:
+        i += 1
+        _, region, _ = regions[i]
+
+    # break if reached the end
+    if i > len(regions)-1 or len(region)<3:
+        break
+
+    # add first non-garbage region and eventual children
+    sub_regions = [i]
+    while i<len(regions)-1:
+      if regions[i + 1][2] == 0:
+        break
+      i += 1
+      if len(regions[i][1])>=3:
+          sub_regions.append(i)
+    compound_regions.append(sub_regions)
+    i += 1
+  return compound_regions
+
+def is_reference_orientation_a_hole(regions, sub_regions):
+  '''determine the orientation of sub regions in a compound region'''
+  reference_orientation_is_hole = False
+  if len(sub_regions) > 1:
+    ref_region = regions[sub_regions[0]][1]
+    poly_ref = Polygon(ref_region)
+    for sub_region in sub_regions:
+      region = regions[sub_region][1]
+      poly_sub_region = Polygon(region)
+
+      if not poly_ref.intersects(poly_sub_region):
+        continue
+
+      area = Polygon(poly_ref.exterior.coords, [poly_sub_region.exterior.coords]).area
+      if area < 0:
+        reference_orientation_is_hole = True
+        break
+  else:
+    region = regions[sub_regions[0]][1]
+    reference_orientation_is_hole = False
+  return reference_orientation_is_hole
 
 def draw_all_dataset(dataset, ncol=13, width=800, alpha=0.5, path=None):
   '''draw all dataset'''
@@ -192,6 +247,14 @@ def save_dataset_as_nifti(dataset, path, voxdim=[0.1, 0.1, 1.25], region_name=No
 
   nii = dataset_to_nifti(dataset, voxdim, region_name)
   nib.save(nii, path)
+
+def load_dataset(path):
+  '''load dataset stored in json format'''
+
+  dataset = None
+  with open(path, 'r') as infile:
+    dataset = json.load(infile)
+  return dataset
 
 def save_dataset(data, path):
   '''save dataset in json format'''
