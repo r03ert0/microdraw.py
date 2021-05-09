@@ -174,7 +174,7 @@ def draw_all_dataset(dataset, ncol=13, width=800, alpha=0.5, path=None):
   j = 0
   for slce in range(dataset["numSlices"]):
     regions = get_regions_from_dataset_slice(dataset["slices"][slce])
-    for name, region in regions:
+    for name, region, _ in regions:
       color = color_from_string(name)
       plt.fill(region[:, 0]+i*width, -region[:, 1]-j*width, alpha=alpha, c=color)
       plt.text((i+0.5)*width, -(j+1)*width, str(slce), alpha=0.5)
@@ -195,7 +195,7 @@ def dataset_as_volume(dataset):
   neds = 0
   for slce in range(dataset["numSlices"]):
     regions = get_regions_from_dataset_slice(dataset["slices"][slce])
-    for _, region in regions:
+    for _, region, _ in regions:
       verts.extend([(x, y, slce) for x, y in region])
       eds.extend([(neds+i, neds+(i+1)%len(region)) for i in range(len(region))])
       neds = len(eds)
@@ -227,7 +227,7 @@ def dataset_to_nifti(dataset, voxdim=[0.1, 0.1, 1.25], region_name=None):
   img = np.zeros([int(x) for x in size], 'uint8')
   for slce in range(dataset["numSlices"]):
     regions = get_regions_from_dataset_slice(dataset["slices"][slce])
-    for name, region in regions:
+    for name, region, _ in regions:
       if region_name is None or name in region_name:
         try:
           rows, cols = polygon(region[:, 0]-vmin[0], region[:, 1]-vmin[1], img.shape)
