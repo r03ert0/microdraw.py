@@ -1,18 +1,14 @@
 """microdraw.py: functions for working with MicroDraw"""
 
-from layers import SinkhornDistance
 from scipy.spatial import distance_matrix
 from shapely.affinity import affine_transform
 from shapely.geometry import Point, Polygon, MultiPolygon, LinearRing
 from shapely.ops import nearest_points
 from skimage import io
 from skimage.draw import polygon, polygon_perimeter
+from skimage.filters import gabor
 from svgpathtools import Path, CubicBezier, Line
 from tqdm import tqdm
-import compute_inner_contours as cic
-import contourOptimalTransportToolbox as cOTT
-import contourToolbox as cT
-import generateProfilesToolbox as gpT
 import hashlib
 import json
 import matplotlib.pyplot as plt
@@ -21,8 +17,13 @@ import numpy as np
 import sys
 import torch
 import urllib.request as urlreq
+from layers import SinkhornDistance
 import pyclipper
-from skimage.filters import gabor
+import compute_inner_contours as cic
+import contourOptimalTransportToolbox as cOTT
+import contourToolbox as cT
+import generateProfilesToolbox as gpT
+import image
 
 
 def download_project_definition(project, token):
@@ -66,9 +67,8 @@ def download_all_regions_from_dataset_slice(
 
   res = urlreq.urlopen(url)
   txt = res.read()
-  conts = json.loads(txt)
 
-  return conts
+  return json.loads(txt)
 
 def download_all_regions_from_dataset(
     source, project, token,
@@ -270,181 +270,180 @@ def color_from_string(my_string):
   return "#" + sha.hexdigest()[:6]
 
 def save_contour(path, ver, con):
-    '''
-    A contour is a list of vertices and a list of edges. A contour can
-    contain multiple independent closed contours, but the list of vertices
-    and edges is always unique. This function saves the contour in a
-    format readable by MeshSurgery.
-    '''
-    fi=open(path, "w")
+  '''
+  A contour is a list of vertices and a list of edges. A contour can
+  contain multiple independent closed contours, but the list of vertices
+  and edges is always unique. This function saves the contour in a
+  format readable by MeshSurgery.
+  '''
+  with open(path, "w") as fi:
     fi.write("%i 0 %i\n"%(len(ver),len(con)))
-    fi.write("\n".join(["%f %f 0"%(cx,cy) for (cx,cy,_) in ver]) + "\n")
-    fi.write("\n".join([str(a)+" "+str(b) for (a,b) in con]))
-    fi.close()
+    fi.write("\n".join("%f %f 0"%(cx,cy) for (cx,cy,_) in ver) + "\n")
+    fi.write("\n".join(str(a)+" "+str(b) for (a,b) in con))
 
 def interp(a,b,x):
-    '''
-    Obtain a vector between a and b at the position a[2]<=x<=b[2]
-    '''
-    l = b[2]-a[2]
-    t = (x-a[2])/l
-    p = a + t*(b-a)
-    return p,t
+  '''
+  Obtain a vector between a and b at the position a[2]<=x<=b[2]
+  '''
+  l = b[2]-a[2]
+  t = (x-a[2])/l
+  p = a + t*(b-a)
+  return p,t
 
 def raw_contour(v, f, x):
-    '''
-    Obtain the contour produced by slicing the mesh with vertices v
-    and faces f at coordinate x in the last dimension. Produces a
-    list of vertices and a list of edges. The vertices for each
-    edge are unique which means that vertices at connecting edges
-    will be duplicated. Each vertex includes a reference to the
-    edge where it comes from. This reference contains the index
-    of the triangle, the number of the edge withing the triangle
-    (0, 1 or 2), and the distance from the beginning of the edge.
-    '''
-    EPS = sys.float_info.epsilon
-    contour = []
-    vert_point_and_coord = []
-    for i in range(len(f)):
-        a,b,c = f[i]
-        ed = []
-        tri_based_coord = []
+  '''
+  Obtain the contour produced by slicing the mesh with vertices v
+  and faces f at coordinate x in the last dimension. Produces a
+  list of vertices and a list of edges. The vertices for each
+  edge are unique which means that vertices at connecting edges
+  will be duplicated. Each vertex includes a reference to the
+  edge where it comes from. This reference contains the index
+  of the triangle, the number of the edge withing the triangle
+  (0, 1 or 2), and the distance from the beginning of the edge.
+  '''
+  EPS = sys.float_info.epsilon
+  contour = []
+  vert_point_and_coord = []
+  for i in range(len(f)):
+    a,b,c = f[i]
+    ed = []
+    tri_based_coord = []
 
-        if np.abs(v[a,2]-x)<EPS:
-            ed.append(v[a])
-            tri_based_coord.append((i,0,0)) # triangle i, edge #0, at the beginning
-        if np.abs(v[b,2]-x)<EPS:
-            ed.append(v[b])
-            tri_based_coord.append((i,1,0)) # triangle i, edge #1, at the beginning
-        if np.abs(v[c,2]-x)<EPS:
-            ed.append(v[c])
-            tri_based_coord.append((i,2,0)) # triangle i, edge #2, at the beginning
-        if (v[a,2]-x)*(v[b,2]-x) < 0:
-            p,t = interp(v[a,:],v[b,:],x)
-            ed.append(p)
-            tri_based_coord.append((i,0,t)) # triangle i, edge #0, t% of the length
-        if (v[b,2]-x)*(v[c,2]-x) < 0:
-            p,t = interp(v[b,:],v[c,:],x)
-            ed.append(p)
-            tri_based_coord.append((i,1,t)) # triangle i, edge #1, t% of the length
-        if (v[c,2]-x)*(v[a,2]-x) < 0:
-            p,t=interp(v[c,:],v[a,:],x)
-            ed.append(p)
-            tri_based_coord.append((i,2,t)) # triangle i, edge #2, t% of the length
+    if np.abs(v[a,2]-x)<EPS:
+      ed.append(v[a])
+      tri_based_coord.append((i,0,0)) # triangle i, edge #0, at the beginning
+    if np.abs(v[b,2]-x)<EPS:
+      ed.append(v[b])
+      tri_based_coord.append((i,1,0)) # triangle i, edge #1, at the beginning
+    if np.abs(v[c,2]-x)<EPS:
+      ed.append(v[c])
+      tri_based_coord.append((i,2,0)) # triangle i, edge #2, at the beginning
+    if (v[a,2]-x)*(v[b,2]-x) < 0:
+      p,t = interp(v[a,:],v[b,:],x)
+      ed.append(p)
+      tri_based_coord.append((i,0,t)) # triangle i, edge #0, t% of the length
+    if (v[b,2]-x)*(v[c,2]-x) < 0:
+      p,t = interp(v[b,:],v[c,:],x)
+      ed.append(p)
+      tri_based_coord.append((i,1,t)) # triangle i, edge #1, t% of the length
+    if (v[c,2]-x)*(v[a,2]-x) < 0:
+      p,t=interp(v[c,:],v[a,:],x)
+      ed.append(p)
+      tri_based_coord.append((i,2,t)) # triangle i, edge #2, t% of the length
 
-        if len(ed) == 2:
-            n = len(vert_point_and_coord)
-            contour.append((n, n+1))
-            vert_point_and_coord.append((ed[0],tri_based_coord[0]))
-            vert_point_and_coord.append((ed[1],tri_based_coord[1]))
-        elif len(ed)>0:
-            print("WEIRD EDGE", ed, tri_based_coord)
+    if len(ed) == 2:
+      n = len(vert_point_and_coord)
+      contour.append((n, n+1))
+      vert_point_and_coord.append((ed[0],tri_based_coord[0]))
+      vert_point_and_coord.append((ed[1],tri_based_coord[1]))
+    elif len(ed)>0:
+      print("WEIRD EDGE", ed, tri_based_coord)
 
-    contour=np.array(contour)
-    return (vert_point_and_coord, contour)
+  contour=np.array(contour)
+  return (vert_point_and_coord, contour)
 
 def no_duplicates_contour(vert_point_and_coord, contour):
-    '''
-    Remove duplicate vertices from the contour given by vertices
-    `vert_point_and_coord` and edges in `contour`. The indices in
-    `contour` are re-indexed accordingly.
-    '''
-    # distance from each point to the others
-    ver = np.zeros((len(vert_point_and_coord),3))
-    for i in range(len(vert_point_and_coord)):
-        ver[i,:] = vert_point_and_coord[i][0]
-    m = distance_matrix(ver, ver)
+  '''
+  Remove duplicate vertices from the contour given by vertices
+  `vert_point_and_coord` and edges in `contour`. The indices in
+  `contour` are re-indexed accordingly.
+  '''
+  # distance from each point to the others
+  ver = np.zeros((len(vert_point_and_coord),3))
+  for i in range(len(vert_point_and_coord)):
+    ver[i,:] = vert_point_and_coord[i][0]
+  m = distance_matrix(ver, ver)
 
-    # set the diagonal to a large number
-    m2 = m + np.eye(m.shape[0])*(np.max(m)+1)
+  # set the diagonal to a large number
+  m2 = m + np.eye(m.shape[0])*(np.max(m)+1)
 
-    # for each point, find the closest among the others
-    closest = np.argmin(m2, axis=0)
-    
-    lut = [i for i in range(len(ver))]
+  # for each point, find the closest among the others
+  closest = np.argmin(m2, axis=0)
+  
+  lut = [i for i in range(len(ver))]
 
-    # make a list of unique vertices and a look-up table
-    n=0
-    unique_vert_point_and_coord = []
-    for i in range(len(ver)):
-        if i<closest[i]:
-            unique_vert_point_and_coord.append((ver[i],vert_point_and_coord[i][1]))
-            lut[i] = n
-            lut[closest[i]] = n
-            n+=1
+  # make a list of unique vertices and a look-up table
+  n=0
+  unique_vert_point_and_coord = []
+  for i in range(len(ver)):
+    if i<closest[i]:
+      unique_vert_point_and_coord.append((ver[i],vert_point_and_coord[i][1]))
+      lut[i] = n
+      lut[closest[i]] = n
+      n+=1
 
-    # re-index the edges to refer to the new list of unique vertices
-    for i in range(len(contour)):
-        contour[i] = (lut[contour[i,0]], lut[contour[i,1]])
-    
-    return (unique_vert_point_and_coord, contour)
+  # re-index the edges to refer to the new list of unique vertices
+  for i in range(len(contour)):
+    contour[i] = (lut[contour[i,0]], lut[contour[i,1]])
+  
+  return (unique_vert_point_and_coord, contour)
 
 def continuous_contours(edge_soup):
-    '''
-    Obtain contiuous lines from the unordered list of edges
-    in edge_soup. Returns an array of lines where each element is a
-    continuous line composed of string of neighbouring vertices
-    '''
-    co1=edge_soup.copy()
-    lines = []
+  '''
+  Obtain contiuous lines from the unordered list of edges
+  in edge_soup. Returns an array of lines where each element is a
+  continuous line composed of string of neighbouring vertices
+  '''
+  co1=edge_soup.copy()
+  lines = []
+  while True:
+    line = []
+    start = co1[0,0]
+    line.append(start)
     while True:
-        line = []
-        start = co1[0,0]
-        line.append(start)
-        while True:
-            found = 0
-            for i,(a,b) in enumerate(co1):
-                if a == line[-1]:
-                    line.append(b)
-                    found = 1
-                elif b == line[-1]:
-                    line.append(a)
-                    found = 1
-                if found:
-                    co1 = np.delete(co1,i,0)
-                    break
-            if found == 0:
-                break
-        if len(line):
-            lines.append(line)
-        else:
-            break
-        if len(co1) == 0:
-            break
-    return lines
+      found = 0
+      for i,(a,b) in enumerate(co1):
+        if a == line[-1]:
+          line.append(b)
+          found = 1
+        elif b == line[-1]:
+          line.append(a)
+          found = 1
+        if found:
+          co1 = np.delete(co1,i,0)
+          break
+      if found == 0:
+        break
+    if len(line):
+      lines.append(line)
+    else:
+      break
+    if len(co1) == 0:
+      break
+  return lines
 
 def slice_mesh(v, f, z, min_contour_length=10):
-    '''
-    Slices the mesh of vertices v and faces f with the plane
-    of given z coordinate. Returns:
-    * unique_verts_point_and_coord: a list of unique vertices,
-    * mesh_relative_vertex_coords: their coordinates relative to the
-      mesh. Each row has 3 values: index of the mesh triangle that
-      was sliced, index of the edge within that triangle, position of
-      the vertex within that edge. The value of the position of the
-      vertex within the edge is 0 if the vertex is at the beginning of
-      the edge, and 1 if it is at the end.
-    * edges: a list of edges,
-    * lines: and a list of continuous lines.
-    '''
-    raw_verts, raw_cont = raw_contour(v, f, z)
-    if len(raw_cont)<min_contour_length:
-        return None,None,None,None
+  '''
+  Slices the mesh of vertices v and faces f with the plane
+  of given z coordinate. Returns:
+  * unique_verts_point_and_coord: a list of unique vertices,
+  * mesh_relative_vertex_coords: their coordinates relative to the
+    mesh. Each row has 3 values: index of the mesh triangle that
+    was sliced, index of the edge within that triangle, position of
+    the vertex within that edge. The value of the position of the
+    vertex within the edge is 0 if the vertex is at the beginning of
+    the edge, and 1 if it is at the end.
+  * edges: a list of edges,
+  * lines: and a list of continuous lines.
+  '''
+  raw_verts, raw_cont = raw_contour(v, f, z)
+  if len(raw_cont)<min_contour_length:
+      return None,None,None,None
 
-    unique_verts_point_and_coord, edges = no_duplicates_contour(raw_verts, raw_cont)
+  unique_verts_point_and_coord, edges = no_duplicates_contour(raw_verts, raw_cont)
 
-    lines = [line for line in continuous_contours(edges) if len(line)>=min_contour_length]
+  lines = [line for line in continuous_contours(edges) if len(line)>=min_contour_length]
 
-    unique_verts = np.zeros((len(unique_verts_point_and_coord),3))
-    mesh_relative_vertex_coords = []
-    for i in range(len(unique_verts_point_and_coord)):
-        unique_verts[i,:] = unique_verts_point_and_coord[i][0]
-        mesh_relative_vertex_coords.append(unique_verts_point_and_coord[i][1])
-    return unique_verts, mesh_relative_vertex_coords, edges, lines
+  unique_verts = np.zeros((len(unique_verts_point_and_coord),3))
+  mesh_relative_vertex_coords = []
+  for i in range(len(unique_verts_point_and_coord)):
+      unique_verts[i,:] = unique_verts_point_and_coord[i][0]
+      mesh_relative_vertex_coords.append(unique_verts_point_and_coord[i][1])
+  return unique_verts, mesh_relative_vertex_coords, edges, lines
 
 def scale_contours_to_image(v, width, height, scale_yz):
-    s = [[ve[0]/scale_yz,height-ve[1]/scale_yz] for ve in v]
-    return np.array(s)
+  s = [[ve[0]/scale_yz,height-ve[1]/scale_yz] for ve in v]
+  return np.array(s)
 
 def draw_slice(v, f, slice_index, path, scale_x=3, scale_yz=0.25, slice_offset=0):
     his = io.imread(path)
@@ -455,84 +454,84 @@ def draw_slice(v, f, slice_index, path, scale_x=3, scale_yz=0.25, slice_offset=0
     plt.scatter(ve[:,0],ve[:,1])
 
 def paperjs_path_to_polygon(co):
-    '''
-    Convert Paper.js paths to a polygon (a line composed of
-    consecutive vertices).
-    
-    Note: Paper.js Bézier curves are encoded as px, py, ax, ay, bx, by,
-    where px, py is an anchor point, ax, ay is the previous handle and
-    bx, by the next handle. SVG path tools use a more standard encoding:
-    p1x,p1y, b1x, b1y, a2x, a2y, p2x, p2y, where p1x, p1y is the start
-    anchor point, p2x, p2y the end anchor point, b1x, b1y is the
-    handle coming out from p1x, p1y, and a2x, a2y is the handle entering
-    into the end anchor point.
-    '''
-    mysegs = []
-    for i in range(len(co)):
-        c = co[i%len(co)]
-        c1 = co[(i+1)%len(co)]
-        try:
-            if isinstance(c[0], list) or isinstance(c[0], np.ndarray):
-                # print("c[0] is list")
-                [s,sj],[_,_],[b,bj] = c
-            else:
-                # print("c[0] is not list:", type(c[0]))
-                s,sj,b,bj = c[0],c[1],0,0
-            if isinstance(c1[0], list) or isinstance(c1[0], np.ndarray):
-                # print("c1[0] is list")
-                [s1,s1j],[a1,a1j],[_,_] = c1
-            else:
-                # print("c1[0] is not list:", type(c1[0]))
-                s1,s1j,a1,a1j = c1[0],c1[1],0,0
-            # print("c:", c)
-            # print("c1:", c1)
-            # print("s,sj:",s,sj,", b,bj:",b,bj, ", s1,sij:", s1,s1j, ", a1,a1j:",a1,a1j)
-            seg = CubicBezier(complex(s,sj), complex(s+b,sj+bj), complex(s1+a1,s1j+a1j), complex(s1,s1j))
-            mysegs.append(seg)
-        except: # ValueError as err:
-            # print(err)
-            pass
-    if len(mysegs) <5:
-        # print("len(mysegs) is < 5")
-        return
-    p = Path(*mysegs)
-    NUM_SAMPLES = int(p.length())
-    my_path = []
-    for i in range(NUM_SAMPLES):
-        x = p.point(i/(NUM_SAMPLES-1))
-        my_path.append([x.real,x.imag])
-    return np.array(my_path)
+  '''
+  Convert Paper.js paths to a polygon (a line composed of
+  consecutive vertices).
+  
+  Note: Paper.js Bézier curves are encoded as px, py, ax, ay, bx, by,
+  where px, py is an anchor point, ax, ay is the previous handle and
+  bx, by the next handle. SVG path tools use a more standard encoding:
+  p1x,p1y, b1x, b1y, a2x, a2y, p2x, p2y, where p1x, p1y is the start
+  anchor point, p2x, p2y the end anchor point, b1x, b1y is the
+  handle coming out from p1x, p1y, and a2x, a2y is the handle entering
+  into the end anchor point.
+  '''
+  mysegs = []
+  for i in range(len(co)):
+    c = co[i%len(co)]
+    c1 = co[(i+1)%len(co)]
+    try:
+      if isinstance(c[0], (list, np.ndarray)):
+        # print("c[0] is list")
+        [s,sj],[_,_],[b,bj] = c
+      else:
+        # print("c[0] is not list:", type(c[0]))
+        s,sj,b,bj = c[0],c[1],0,0
+      if isinstance(c1[0], (list, np.ndarray)):
+        # print("c1[0] is list")
+        [s1,s1j],[a1,a1j],[_,_] = c1
+      else:
+        # print("c1[0] is not list:", type(c1[0]))
+        s1,s1j,a1,a1j = c1[0],c1[1],0,0
+      # print("c:", c)
+      # print("c1:", c1)
+      # print("s,sj:",s,sj,", b,bj:",b,bj, ", s1,sij:", s1,s1j, ", a1,a1j:",a1,a1j)
+      seg = CubicBezier(complex(s,sj), complex(s+b,sj+bj), complex(s1+a1,s1j+a1j), complex(s1,s1j))
+      mysegs.append(seg)
+    except: # ValueError as err:
+        # print(err)
+        pass
+  if len(mysegs) <5:
+      # print("len(mysegs) is < 5")
+      return
+  p = Path(*mysegs)
+  NUM_SAMPLES = int(p.length())
+  my_path = []
+  for i in range(NUM_SAMPLES):
+      x = p.point(i/(NUM_SAMPLES-1))
+      my_path.append([x.real,x.imag])
+  return np.array(my_path)
 
 def download_microdraw_contours_as_polygons(source, project, sliceIndex, token, width):
-    conts = download_all_regions_from_dataset_slice(source, project, sliceIndex, token)
-    if len(conts) == 0:
-        # print("len(conts) is 0")
-        return
-    polys = []
-    for i in range(len(conts)):
-        root = conts[i]["annotation"]["path"][1]
+  conts = download_all_regions_from_dataset_slice(source, project, sliceIndex, token)
+  if len(conts) == 0:
+    # print("len(conts) is 0")
+    return
+  polys = []
+  for i in range(len(conts)):
+    root = conts[i]["annotation"]["path"][1]
 
-        if "segments" in root:
-            poly = paperjs_path_to_polygon(np.array(root["segments"]))
-            if poly is not None:
-                poly = poly*width/1000 # scale to match image size
-                polys.append(poly)
-            # else:
-            #     print("segments poly is None")
-            #     print(poly)
-        if "children" in root:
-            for cont in root["children"]:
-                poly = paperjs_path_to_polygon(np.array(cont[1]["segments"]))
-                if poly is not None:
-                    poly = poly*width/1000 # scale to match image size
-                    polys.append(poly)
-                # else:
-                #    print("children poly is none")
-    return polys
+    if "segments" in root:
+      poly = paperjs_path_to_polygon(np.array(root["segments"]))
+      if poly is not None:
+          poly = poly*width/1000 # scale to match image size
+          polys.append(poly)
+      # else:
+      #     print("segments poly is None")
+      #     print(poly)
+    if "children" in root:
+      for cont in root["children"]:
+        poly = paperjs_path_to_polygon(np.array(cont[1]["segments"]))
+        if poly is not None:
+          poly = poly*width/1000 # scale to match image size
+          polys.append(poly)
+        # else:
+        #   print("children poly is none")
+  return polys
 
 def save_slice_contours_in_svg(path, contours, width, height):
-    poly = MultiPolygon([Polygon(c) for c in contours])
-    svg_start = '''<svg
+  poly = MultiPolygon([Polygon(c) for c in contours])
+  svg_start = '''<svg
       xmlns="http://www.w3.org/2000/svg"
       xmlns:xlink="http://www.w3.org/1999/xlink"
       width="{width}"
@@ -540,30 +539,29 @@ def save_slice_contours_in_svg(path, contours, width, height):
       viewBox="0,0,{width},{height}"
     >
     '''.format(width=width,height=height)
-    svg_content = poly.svg(scale_factor=2,fill_color="#000000")
-    svg_end = '''
+  svg_content = poly.svg(scale_factor=2,fill_color="#000000")
+  svg_end = '''
     </svg>'''
-    svg = svg_start + svg_content + svg_end
-    svg = svg.replace('opacity="0.6"', 'opacity="1"').replace('stroke="#555555"', 'stroke="#ffffff"')
-    file = open(path,"w")
+  svg = svg_start + svg_content + svg_end
+  svg = svg.replace('opacity="0.6"', 'opacity="1"').replace('stroke="#555555"', 'stroke="#ffffff"')
+  with open(path,"w") as file:
     file.write(svg)
-    file.close()
 
 def convert_polygons_to_microdraw_json(lines, name, rgb):
-    '''
-    Convert an array of lines (a series of vertices) into Microdraw JSON
-    format (which is the default Paper.js format)
-    '''
-    text = "[\n"
-    annotations = []
-    for line in lines:
-        annotation = '''{
-        "annotation":{"path":["Path",{"applyMatrix":true,"segments":%s,"closed":false,"fillColor":[%s],"strokeColor":[0,0,0],"strokeScaling":false}
-        ],"name":"%s"}}'''%(line,rgb,name)
-        annotations.append(annotation)
-    text += ",\n".join(annotations)
-    text += "]"
-    return text
+  '''
+  Convert an array of lines (a series of vertices) into Microdraw JSON
+  format (which is the default Paper.js format)
+  '''
+  text = "[\n"
+  annotations = []
+  for line in lines:
+      annotation = '''{
+      "annotation":{"path":["Path",{"applyMatrix":true,"segments":%s,"closed":false,"fillColor":[%s],"strokeColor":[0,0,0],"strokeScaling":false}
+      ],"name":"%s"}}'''%(line,rgb,name)
+      annotations.append(annotation)
+  text += ",\n".join(annotations)
+  text += "]"
+  return text
 
 def icp_step(mov, ref):
   out = [nearest_points(Polygon(ref),Point(pt))[0].coords[0] for pt in mov]
