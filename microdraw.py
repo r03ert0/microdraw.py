@@ -186,16 +186,23 @@ def draw_all_dataset(dataset, ncol=13, width=800, alpha=0.5, path=None):
   if path:
     plt.savefig(path)
 
-def dataset_as_volume(dataset):
-  '''combine all contours into a single mesh. This mesh does not have
-  triangles, only contours.'''
+def dataset_as_volume(dataset, filter=None):
+  '''
+  Combine all regions into a single mesh. This mesh does not have
+  triangles, only region contours.
+  dataset: the dataset from which to obtain the region contours
+  filter: an optional array of strings with the names of the regions
+          to include in the mesh
+  '''
 
   verts = []
   eds = []
   neds = 0
   for slce in range(dataset["numSlices"]):
     regions = get_regions_from_dataset_slice(dataset["slices"][slce])
-    for _, region, _ in regions:
+    for name, region, _ in regions:
+      if filter != None and name not in filter:
+        continue
       verts.extend([(x, y, slce) for x, y in region])
       eds.extend([(neds+i, neds+(i+1)%len(region)) for i in range(len(region))])
       neds = len(eds)
