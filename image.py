@@ -94,10 +94,17 @@ def get_concatenated_image(images):
     offset_col = 0
     for col in range(len(images[row])):
       im = images[row][col]
-      slice_image[
-        offset_row:(offset_row+im.shape[0]),
-        offset_col:(offset_col+im.shape[1]),
-        :] = im
+      dims = len(im.shape)
+      if dims == 2:
+        slice_image[
+          offset_row:(offset_row+im.shape[0]),
+          offset_col:(offset_col+im.shape[1])] = im
+      else:
+        slice_image[
+          offset_row:(offset_row+im.shape[0]),
+          offset_col:(offset_col+im.shape[1]),
+          :] = im
+      
       offset_col += im.shape[1]
     offset_row += im.shape[0]
   return slice_image
