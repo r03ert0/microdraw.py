@@ -1,6 +1,6 @@
 """microdraw.py: functions for working with MicroDraw"""
 
-from scipy.spatial import distance_matrix
+import shapely
 from shapely.affinity import affine_transform
 from shapely.geometry import Point, Polygon, MultiPolygon, LinearRing
 from shapely.ops import nearest_points
@@ -24,7 +24,10 @@ import contourOptimalTransportToolbox as cOTT
 import contourToolbox as cT
 import generateProfilesToolbox as gpT
 import image
+import mesh
 
+def version():
+  print("1")
 
 def download_project_definition(project, token):
   '''Download a project. A project can contain several datasets'''
@@ -116,36 +119,53 @@ def get_regions_from_dataset_slice(dataset):
             regions.append((name, np.array(points), children_number))
   return regions
 
-def find_compound_regions(regions):
-  '''combine regions into compound regions'''
-  compound_regions = []
+def find_compound_regions(regions, min_points_in_region=3):
+  raise ValueError("Renamed as find_compound_region_indices")
+
+def find_compound_region_indices(regions, min_points_in_region=3):
+  '''
+  Create an array of non-garbage compound region indices.
+  The regions are all in the same slice.
+  Regions in microdraw can be garbage regions (very few points).
+  They can also be compound, and contain subregions. These
+  subregions can also be garbage.
+  This function finds all non-garbage regions and builds an
+  array of indices for all their non-garbage subregions.
+  The index of the main array is the same as the index of the
+  original regions. Within each of these entries, the indices
+  correspond to the index of the subregion within the region.
+  '''
+
+  compound_region_indices = []
   i=0
   while i < len(regions):
     _, region, _ = regions[i]
 
-    # skip garbage at the begining
-    while len(region)<3 and i<len(regions)-1:
+    # skip potential garbage at the begining
+    while len(region) < min_points_in_region and i < len(regions)-1:
         i += 1
         _, region, _ = regions[i]
 
     # break if reached the end
-    if i > len(regions)-1 or len(region)<3:
+    if i > len(regions)-1 or len(region) < min_points_in_region:
         break
 
     # add first non-garbage region and eventual children
     sub_regions = [i]
-    while i<len(regions)-1:
+    while i < len(regions)-1:
       if regions[i + 1][2] == 0:
         break
       i += 1
-      if len(regions[i][1])>=3:
+      if len(regions[i][1]) >= min_points_in_region:
           sub_regions.append(i)
-    compound_regions.append(sub_regions)
+    compound_region_indices.append(sub_regions)
     i += 1
-  return compound_regions
+  return compound_region_indices
 
 def is_reference_orientation_a_hole(regions, sub_regions):
-  '''determine the orientation of sub regions in a compound region'''
+  '''
+  Determine the orientation of sub regions in a compound region
+  '''
   reference_orientation_is_hole = False
   if len(sub_regions) > 1:
     ref_region = regions[sub_regions[0]][1]
@@ -165,6 +185,50 @@ def is_reference_orientation_a_hole(regions, sub_regions):
     region = regions[sub_regions[0]][1]
     reference_orientation_is_hole = False
   return reference_orientation_is_hole
+
+def normalise_compound_region(compound_region_indices, regions):
+  '''
+  Normalise a compound region so that exterior contours are
+  counterclockwise and holes are clockwise.
+  '''
+  _, sub_regions = compound_region_indices
+
+  reference_orientation = LinearRing(regions[sub_regions[0]][1]).is_ccw
+  reference_orientation_is_hole = is_reference_orientation_a_hole(regions, sub_regions)
+
+  normalised_compound_region = []
+  for sub_region in sub_regions:
+      name, region, child_number = regions[sub_region]
+      oriented_as_reference = LinearRing(region).is_ccw==reference_orientation
+      is_hole = oriented_as_reference if reference_orientation_is_hole else (not oriented_as_reference)
+
+      normalised_region = region.copy()
+      if is_hole and LinearRing(region).is_ccw:
+          normalised_region = np.flip(region, axis=0)
+      if not is_hole and not LinearRing(region).is_ccw:
+          normalised_region = np.flip(region, axis=0)
+      normalised_compound_region.append([name, normalised_region, child_number])
+  return normalised_compound_region
+
+def compound_region_to_polygon(region, compound_region_indices):
+  raise ValueError("Replaced by compound_region_to_polygons, which returns an array of polygons")
+
+def compound_region_to_polygons(region, compound_region_indices):
+  poly = Polygon(
+    region[compound_region_indices[0]][1],
+    [region[sub_region_index][1] for sub_region_index in compound_region_indices[1:]])
+  if poly.is_valid:
+    return [poly]
+
+  tmp = shapely.ops.polygonize_full(poly)
+  polys = []
+  for elem in tmp:
+    for elem1 in elem.geoms:
+      if type(elem1) is shapely.geometry.linestring.LineString:
+        polys.append(Polygon(elem1))
+      else:
+        polys.append(elem1)
+  return polys
 
 def draw_all_dataset(dataset, ncol=13, width=800, alpha=0.5, path=None):
   '''draw all dataset'''
@@ -288,175 +352,26 @@ def save_contour(path, ver, con):
     fi.write("\n".join("%f %f 0"%(cx,cy) for (cx,cy,_) in ver) + "\n")
     fi.write("\n".join(str(a)+" "+str(b) for (a,b) in con))
 
-def interp(a,b,x):
-  '''
-  Obtain a vector between a and b at the position a[2]<=x<=b[2]
-  '''
-  l = b[2]-a[2]
-  t = (x-a[2])/l
-  p = a + t*(b-a)
-  return p,t
-
 def raw_contour(v, f, x):
-  '''
-  Obtain the contour produced by slicing the mesh with vertices v
-  and faces f at coordinate x in the last dimension. Produces a
-  list of vertices and a list of edges. The vertices for each
-  edge are unique which means that vertices at connecting edges
-  will be duplicated. Each vertex includes a reference to the
-  edge where it comes from. This reference contains the index
-  of the triangle, the number of the edge withing the triangle
-  (0, 1 or 2), and the distance from the beginning of the edge.
-  '''
-  EPS = sys.float_info.epsilon
-  contour = []
-  vert_point_and_coord = []
-  for i in range(len(f)):
-    a,b,c = f[i]
-    ed = []
-    tri_based_coord = []
-
-    if np.abs(v[a,2]-x)<EPS:
-      ed.append(v[a])
-      tri_based_coord.append((i,0,0)) # triangle i, edge #0, at the beginning
-    if np.abs(v[b,2]-x)<EPS:
-      ed.append(v[b])
-      tri_based_coord.append((i,1,0)) # triangle i, edge #1, at the beginning
-    if np.abs(v[c,2]-x)<EPS:
-      ed.append(v[c])
-      tri_based_coord.append((i,2,0)) # triangle i, edge #2, at the beginning
-    if (v[a,2]-x)*(v[b,2]-x) < 0:
-      p,t = interp(v[a,:],v[b,:],x)
-      ed.append(p)
-      tri_based_coord.append((i,0,t)) # triangle i, edge #0, t% of the length
-    if (v[b,2]-x)*(v[c,2]-x) < 0:
-      p,t = interp(v[b,:],v[c,:],x)
-      ed.append(p)
-      tri_based_coord.append((i,1,t)) # triangle i, edge #1, t% of the length
-    if (v[c,2]-x)*(v[a,2]-x) < 0:
-      p,t=interp(v[c,:],v[a,:],x)
-      ed.append(p)
-      tri_based_coord.append((i,2,t)) # triangle i, edge #2, t% of the length
-
-    if len(ed) == 2:
-      n = len(vert_point_and_coord)
-      contour.append((n, n+1))
-      vert_point_and_coord.append((ed[0],tri_based_coord[0]))
-      vert_point_and_coord.append((ed[1],tri_based_coord[1]))
-    elif len(ed)>0:
-      print("WEIRD EDGE", ed, tri_based_coord)
-
-  contour=np.array(contour)
-  return (vert_point_and_coord, contour)
+  raise ValueError("Moved to mic.mesh.raw_contour")
 
 def no_duplicates_contour(vert_point_and_coord, contour):
-  '''
-  Remove duplicate vertices from the contour given by vertices
-  `vert_point_and_coord` and edges in `contour`. The indices in
-  `contour` are re-indexed accordingly.
-  '''
-  # distance from each point to the others
-  ver = np.zeros((len(vert_point_and_coord),3))
-  for i in range(len(vert_point_and_coord)):
-    ver[i,:] = vert_point_and_coord[i][0]
-  m = distance_matrix(ver, ver)
-
-  # set the diagonal to a large number
-  m2 = m + np.eye(m.shape[0])*(np.max(m)+1)
-
-  # for each point, find the closest among the others
-  closest = np.argmin(m2, axis=0)
-  
-  lut = [i for i in range(len(ver))]
-
-  # make a list of unique vertices and a look-up table
-  n=0
-  unique_vert_point_and_coord = []
-  for i in range(len(ver)):
-    if i<closest[i]:
-      unique_vert_point_and_coord.append((ver[i],vert_point_and_coord[i][1]))
-      lut[i] = n
-      lut[closest[i]] = n
-      n+=1
-
-  # re-index the edges to refer to the new list of unique vertices
-  for i in range(len(contour)):
-    contour[i] = (lut[contour[i,0]], lut[contour[i,1]])
-  
-  return (unique_vert_point_and_coord, contour)
+  raise ValueError("Moved to mic.mesh.no_duplicates_contour")
 
 def continuous_contours(edge_soup):
-  '''
-  Obtain contiuous lines from the unordered list of edges
-  in edge_soup. Returns an array of lines where each element is a
-  continuous line composed of string of neighbouring vertices
-  '''
-  co1=edge_soup.copy()
-  lines = []
-  while True:
-    line = []
-    start = co1[0,0]
-    line.append(start)
-    while True:
-      found = 0
-      for i,(a,b) in enumerate(co1):
-        if a == line[-1]:
-          line.append(b)
-          found = 1
-        elif b == line[-1]:
-          line.append(a)
-          found = 1
-        if found:
-          co1 = np.delete(co1,i,0)
-          break
-      if found == 0:
-        break
-    if len(line):
-      lines.append(line)
-    else:
-      break
-    if len(co1) == 0:
-      break
-  return lines
+  raise ValueError("Moved to mic.mesh.continous_contours")
 
 def slice_mesh(v, f, z, min_contour_length=10):
-  '''
-  Slices the mesh of vertices v and faces f with the plane
-  of given z coordinate. Returns:
-  * unique_verts_point_and_coord: a list of unique vertices,
-  * mesh_relative_vertex_coords: their coordinates relative to the
-    mesh. Each row has 3 values: index of the mesh triangle that
-    was sliced, index of the edge within that triangle, position of
-    the vertex within that edge. The value of the position of the
-    vertex within the edge is 0 if the vertex is at the beginning of
-    the edge, and 1 if it is at the end.
-  * edges: a list of edges,
-  * lines: and a list of continuous lines.
-  '''
-  raw_verts, raw_cont = raw_contour(v, f, z)
-  if len(raw_cont)<min_contour_length:
-      return None,None,None,None
-
-  unique_verts_point_and_coord, edges = no_duplicates_contour(raw_verts, raw_cont)
-
-  lines = [line for line in continuous_contours(edges) if len(line)>=min_contour_length]
-
-  unique_verts = np.zeros((len(unique_verts_point_and_coord),3))
-  mesh_relative_vertex_coords = []
-  for i in range(len(unique_verts_point_and_coord)):
-      unique_verts[i,:] = unique_verts_point_and_coord[i][0]
-      mesh_relative_vertex_coords.append(unique_verts_point_and_coord[i][1])
-  return unique_verts, mesh_relative_vertex_coords, edges, lines
+  raise ValueError("Moved to mic.mesh.slice_mesh")
 
 def scale_contours_to_image(v, width, height, scale_yz):
-  s = [[ve[0]/scale_yz,height-ve[1]/scale_yz] for ve in v]
-  return np.array(s)
+  raise ValueError("Moved to mic.mesh.scale_contours_to_image")
 
 def draw_slice(v, f, slice_index, path, scale_x=3, scale_yz=0.25, slice_offset=0):
     his = io.imread(path)
     iH, iW, _ = his.shape
-    ve, _, _, _ = slice_mesh(v, f, (slice_index-slice_offset)*scale_x)
-    ve = scale_contours_to_image(ve, iW, iH, scale_yz)
+    ve, _, _, _ = mesh.slice_mesh(v, f, (slice_index-slice_offset)*scale_x)
+    ve = mesh.scale_contours_to_image(ve, iW, iH, scale_yz)
     plt.imshow(his)
     plt.scatter(ve[:,0],ve[:,1])
 
@@ -669,10 +584,10 @@ def register_microdraw_contours_to_mesh_contours_for_slice(source, project, slic
     if manual is None:
         # print("manual is None")
         return None,None,None,None
-    ve, veco, _, lines = slice_mesh(v, f, (sliceIndex-slice_offset)*scale_x)
+    ve, veco, _, lines = mesh.slice_mesh(v, f, (sliceIndex-slice_offset)*scale_x)
     if ve is None:
         return None,None,None,None
-    ve = scale_contours_to_image(ve, width, height, scale_yz)
+    ve = mesh.scale_contours_to_image(ve, width, height, scale_yz)
     auto = [ve[line] for line in lines]
     autoco = []
     for line in lines:
@@ -870,35 +785,31 @@ def _reparam(y,val):
     return y
 
 def _assignments_proj_line(b, P):
-    '''weighted average position over the linear ring'''
-    lb = LinearRing(b)
-    lpb = _lengthparam(b)
-    res = []
-    maxc = []
-    for i,_ in enumerate(b):
-        Q=P[i]
-        j = np.argmax(Q)
-        sump = np.sum(Q)
-        replb = _reparam(lpb, lpb[j])
-        replb2 = Q.dot(replb)/sump + lpb[j]
-        res.append(replb2)
-        maxc.append(lpb[j])
-    y2 = []
-    for d in res:
-        y2.append(lb.interpolate(d, normalized=False).coords[0])
-    return np.array(y2)
+  '''weighted average position over the linear ring'''
+  lb = LinearRing(b)
+  lpb = _lengthparam(b)
+  res = []
+  maxc = []
+  for i,_ in enumerate(b):
+      Q=P[i]
+      j = np.argmax(Q)
+      sump = np.sum(Q)
+      replb = _reparam(lpb, lpb[j])
+      replb2 = Q.dot(replb)/sump + lpb[j]
+      res.append(replb2)
+      maxc.append(lpb[j])
+  y2 = [lb.interpolate(d, normalized=False).coords[0] for d in res]
+  return np.array(y2)
 
 def assignments(a, b, P, projection_type="line"):
-    b_final = None
-    if projection_type is "line":
-        b_final = _assignments_proj_line(b, P)
-    elif projection_type is "weighted":
-        b_final = _assignments_proj_weighted(b, P)
-    elif projection_type is "weighted2":
-        b_final = _assignments_proj_weighted2(a, b, P)
-    else:
-        b_final = _assignments_proj_maxcoupling(b, P)
-    return b_final
+  if projection_type is "line":
+    return _assignments_proj_line(b, P)
+  elif projection_type is "weighted":
+    return _assignments_proj_weighted(b, P)
+  elif projection_type is "weighted2":
+    return _assignments_proj_weighted2(a, b, P)
+  else:
+    return _assignments_proj_maxcoupling(b, P)
 
 def compute_inner_contours_for_polygons_outwards(polygons,
     iterations=3,
