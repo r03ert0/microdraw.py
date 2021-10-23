@@ -22,10 +22,17 @@ def get_microdraw_slice_size(
   '''Get the width and height of the slice'''
   if dataset_description is None:
     dataset_description = get_dataset_description(source)
+
   dzi_url = dataset_description["tileSources"][slice_index]
-  base_url = urllib.parse.urlparse(source).netloc
-  base_protocol = urllib.parse.urlparse(source).scheme
-  url = base_protocol + "://" + base_url + dzi_url
+  if urllib.parse.urlparse(dzi_url).scheme == '':
+    # dzi_url is relative to microdraw
+    base_url = urllib.parse.urlparse(source).netloc
+    base_protocol = urllib.parse.urlparse(source).scheme
+    url = base_protocol + "://" + base_url + dzi_url
+  else:
+    # dzi_url is absolute
+    url = dzi_url
+
   data = urllib.request.urlopen(url)
   txt = data.read().decode('ascii')
   W = int(re.findall('Width="(\d+)"', txt)[0])
@@ -57,9 +64,14 @@ def get_slice_image_array_at_scale_level(
   ncols, nrows = get_nrows_ncols(W, H, scale_level)
 
   dzi_url = dataset_description["tileSources"][slice_index]
-  base_url = urllib.parse.urlparse(source).netloc
-  base_protocol = urllib.parse.urlparse(source).scheme
-  files_url = base_protocol + "://" + base_url + dzi_url.replace(".dzi","_files")
+  if urllib.parse.urlparse(dzi_url).scheme == '':
+    # dzi_url is relative to microdraw
+    base_url = urllib.parse.urlparse(source).netloc
+    base_protocol = urllib.parse.urlparse(source).scheme
+    files_url = base_protocol + "://" + base_url + dzi_url.replace(".dzi","_files")
+  else:
+    # dzi_url is absolute
+    files_url = dzi_url.replace(".dzi","_files")  
 
   images = []
   for row in range(nrows):
