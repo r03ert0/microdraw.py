@@ -211,9 +211,11 @@ def normalise_compound_region(compound_region_indices, regions):
   return normalised_compound_region
 
 def compound_region_to_polygon(region, compound_region_indices):
+  '''deprecated: use compound_region_to_polygons instead.'''
   raise ValueError("Replaced by compound_region_to_polygons, which returns an array of polygons")
 
 def compound_region_to_polygons(region, compound_region_indices):
+  '''convert a compound region into an array of shapely polygons'''
   poly = Polygon(
     region[compound_region_indices[0]][1],
     [region[sub_region_index][1] for sub_region_index in compound_region_indices[1:]])
