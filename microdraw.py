@@ -73,6 +73,18 @@ def download_all_regions_from_dataset_slice(
 
   return json.loads(txt)
 
+def download_all_regions_from_dataset_slice_array(
+    source, project, token,
+    slice_array,
+    microdraw_url="https://microdraw.pasteur.fr"):
+  '''Download all regions in a an array of dataset slices'''
+
+  dataset = download_dataset_definition(source)
+  dataset["slices"] = [[] for _ in range(dataset["numSlices"])]
+  for i in slice_array:
+    dataset["slices"][i] = download_all_regions_from_dataset_slice(source, project, i, token, microdraw_url=microdraw_url)
+  return dataset
+
 def download_all_regions_from_dataset(
     source, project, token,
     microdraw_url="https://microdraw.pasteur.fr"):
