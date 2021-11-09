@@ -19,12 +19,18 @@ def get_microdraw_slice_size(
   source,
   slice_index,
   dataset_description = None):
-  '''Get the width and height of the slice'''
+  '''Get the width and height of the slice. Values are obtained
+  from the dzi xml file if that is provided, or from the width
+  and height properties of the dictionary if the tileSource is
+  provided through a formula.'''
   if dataset_description is None:
     dataset_description = get_dataset_description(source)
 
   dzi_url = dataset_description["tileSources"][slice_index]
-  if urllib.parse.urlparse(dzi_url).scheme == '':
+  if isinstance(dzi_url, dict):
+    W, H = dzi_url["width"], dzi_url["height"]
+    return W, H
+  elif urllib.parse.urlparse(dzi_url).scheme == '':
     # dzi_url is relative to microdraw
     base_url = urllib.parse.urlparse(source).netloc
     base_protocol = urllib.parse.urlparse(source).scheme
