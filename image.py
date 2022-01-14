@@ -7,6 +7,7 @@ import urllib
 import json
 import re
 from skimage.io import imread
+import subprocess as sp
 
 def get_dataset_description(source):
   '''
@@ -57,6 +58,22 @@ def get_nrows_ncols(W, H, scale_level, tile_size=2**8):
     int(np.ceil(H/2**(max_levels-scale_level)/tile_size))
   )
 
+def _get_dzi_image_format(dzi_url):
+  '''returns the image format in which the dzi tiles are encoded'''
+  res = urllib.request.urlopen(dzi_url).read()
+  ext = [r[1] for r in [row.split("=") for row in str(res).split(" ")] if len(r)==2 and r[0]=="Format"][0].replace('"','')
+  ext = ext.replace("\\n", "")
+  return ext.strip(" \t\n\r")
+
+
+def _get_tile_from_function(tile_fn, l, row, col):
+  tile_fn = sp.check_output([
+    '/usr/local/bin/node',
+    '-e',
+    'const fn=' + tile_fn + ';process.stdout.write(fn(%i,%i,%i))'%(l,row,col)
+  ])
+  return tile_fn.decode('utf8')
+
 def get_slice_image_array_at_scale_level(
   source,
   slice_index,
@@ -70,24 +87,32 @@ def get_slice_image_array_at_scale_level(
   ncols, nrows = get_nrows_ncols(W, H, scale_level)
 
   dzi_url = dataset_description["tileSources"][slice_index]
-  if urllib.parse.urlparse(dzi_url).scheme == '':
-    # dzi_url is relative to microdraw
-    base_url = urllib.parse.urlparse(source).netloc
-    base_protocol = urllib.parse.urlparse(source).scheme
-    files_url = base_protocol + "://" + base_url + dzi_url.replace(".dzi","_files")
-  else:
-    # dzi_url is absolute
-    files_url = dzi_url.replace(".dzi","_files")  
-
+  base_url = urllib.parse.urlparse(source).netloc
+  base_protocol = urllib.parse.urlparse(source).scheme
   images = []
-  for row in range(nrows):
-    row_arr = []
-    for col in range(ncols):
-      url = files_url + "/%i/%i_%i.jpeg"%(scale_level,col,row)
-      # print(url)
-      image = imread(url)
-      row_arr.append(image)
-    images.append(row_arr)
+  if isinstance(dzi_url, dict):
+    file_base_url = base_protocol + "://" + base_url
+    for row in range(nrows):
+      row_arr = []
+      for col in range(ncols):
+        tile_url_string = _get_tile_from_function(dzi_url["getTileUrl"], scale_level, col, row)
+        url = file_base_url + tile_url_string
+        image = imread(url)
+        row_arr.append(image)
+      images.append(row_arr)
+  else:
+    if urllib.parse.urlparse(dzi_url).scheme == '':
+      # dzi_url is relative to microdraw
+      dzi_url = base_protocol + "://" + base_url + dzi_url
+    ext = _get_dzi_image_format(dzi_url)
+    files_url = dzi_url.replace(".dzi","_files")
+    for row in range(nrows):
+      row_arr = []
+      for col in range(ncols):
+        url = files_url + "/%i/%i_%i.%s"%(scale_level,col,row, ext)
+        image = imread(url)
+        row_arr.append(image)
+      images.append(row_arr)
   return  images
 
 def _get_concatenated_image_size(images):
