@@ -111,6 +111,118 @@ def download_all_regions_from_dataset(
       microdraw_url=microdraw_url))
   return dataset
 
+def _paperjs_path_to_polygon(co):
+  '''
+  Convert Paper.js paths to a polygon (a line composed of
+  consecutive vertices).
+  Used by `download_microdraw_contours_as_polygons`.
+  
+  Note: Paper.js Bézier curves are encoded as px, py, ax, ay, bx, by,
+  where px, py is an anchor point, ax, ay is the previous handle and
+  bx, by the next handle. SVG path tools use a more standard encoding:
+  p1x,p1y, b1x, b1y, a2x, a2y, p2x, p2y, where p1x, p1y is the start
+  anchor point, p2x, p2y the end anchor point, b1x, b1y is the
+  handle coming out from p1x, p1y, and a2x, a2y is the handle entering
+  into the end anchor point.
+  '''
+  mysegs = []
+  for i in range(len(co)):
+    c = co[i%len(co)]
+    c1 = co[(i+1)%len(co)]
+    try:
+      if isinstance(c[0], (list, np.ndarray)):
+        # print("c[0] is list")
+        [s,sj],[_,_],[b,bj] = c
+      else:
+        # print("c[0] is not list:", type(c[0]))
+        s,sj,b,bj = c[0],c[1],0,0
+      if isinstance(c1[0], (list, np.ndarray)):
+        # print("c1[0] is list")
+        [s1,s1j],[a1,a1j],[_,_] = c1
+      else:
+        # print("c1[0] is not list:", type(c1[0]))
+        s1,s1j,a1,a1j = c1[0],c1[1],0,0
+      # print("c:", c)
+      # print("c1:", c1)
+      # print("s,sj:",s,sj,", b,bj:",b,bj, ", s1,sij:", s1,s1j, ", a1,a1j:",a1,a1j)
+      seg = CubicBezier(
+        complex(s,sj),
+        complex(s+b,sj+bj),
+        complex(s1+a1,s1j+a1j),
+        complex(s1,s1j))
+      mysegs.append(seg)
+    except: # ValueError as err:
+        # print(err)
+        pass
+  if len(mysegs) <5:
+      # print("len(mysegs) is < 5")
+      return
+  p = Path(*mysegs)
+  NUM_SAMPLES = int(p.length())
+  my_path = []
+  for i in range(NUM_SAMPLES):
+      x = p.point(i/(NUM_SAMPLES-1))
+      my_path.append([x.real,x.imag])
+  return np.array(my_path)
+
+def convert_microdraw_contours_to_polygons(
+  conts,
+  width
+):
+  '''Convert MicroDraw contours to polygons. MicroDraw contours
+  are Paper.js polygons or Bézier curves. Polygons are arrays
+  of 2D coordinates.
+
+  Parameters
+  ----------
+  conts: MicroDraw contour
+    A MicroDraw contour, which are Paper.js contours.
+
+  Returns
+  -------
+  polys: A list of polygons corresponding to the individual
+    contours in `conts`. Each polygon is an array of 2D
+    coordinates.
+  '''
+
+  polys = []
+  for i in range(len(conts)):
+    root = conts[i]["annotation"]["path"][1]
+
+    if "segments" in root:
+      poly = _paperjs_path_to_polygon(np.array(root["segments"]))
+      if poly is not None:
+          poly = poly*width/1000 # scale to match image size
+          polys.append(poly)
+      # else:
+      #     print("segments poly is None")
+      #     print(poly)
+    if "children" in root:
+      for cont in root["children"]:
+        poly = _paperjs_path_to_polygon(np.array(cont[1]["segments"]))
+        if poly is not None:
+          poly = poly*width/1000 # scale to match image size
+          polys.append(poly)
+        # else:
+        #   print("children poly is none")
+  return polys
+
+def download_microdraw_contours_as_polygons(
+  source,
+  project,
+  slice_index,
+  token,
+  width
+):
+  conts = download_all_regions_from_dataset_slice(
+    source, project, slice_index, token)
+  if len(conts) == 0:
+    # print("len(conts) is 0")
+    return None
+  polys = convert_microdraw_contours_to_polygons(
+    conts, width)
+  return polys
+
 def get_points_from_segment(
   seg
 ):
@@ -139,7 +251,7 @@ def get_regions_from_dataset_slice(
     if path_type == "Path" and 'segments' in region['annotation']['path'][1]:
       seg = np.asfortranarray(region['annotation']['path'][1]['segments'])
       points = get_points_from_segment(seg)
-      regions.append((name, np.array(points),0))
+      regions.append((name, np.array(points), 0))
     elif path_type == "CompoundPath":
       children = region['annotation']['path'][1]['children']
       for children_number,child in enumerate(children):
@@ -484,93 +596,6 @@ def draw_slice(
   plt.imshow(his)
   plt.scatter(ve[:,0],ve[:,1])
 
-def paperjs_path_to_polygon(
-  co
-):
-  '''Convert Paper.js paths to a polygon (a line composed of
-  consecutive vertices).
-
-  Note: Paper.js Bézier curves are encoded as px, py, ax, ay, bx, by,
-  where px, py is an anchor point, ax, ay is the previous handle and
-  bx, by the next handle. SVG path tools use a more standard encoding:
-  p1x,p1y, b1x, b1y, a2x, a2y, p2x, p2y, where p1x, p1y is the start
-  anchor point, p2x, p2y the end anchor point, b1x, b1y is the
-  handle coming out from p1x, p1y, and a2x, a2y is the handle entering
-  into the end anchor point.
-  '''
-  mysegs = []
-  for i in range(len(co)):
-    c = co[i%len(co)]
-    c1 = co[(i+1)%len(co)]
-    try:
-      if isinstance(c[0], (list, np.ndarray)):
-        # print("c[0] is list")
-        [s,sj],[_,_],[b,bj] = c
-      else:
-        # print("c[0] is not list:", type(c[0]))
-        s,sj,b,bj = c[0],c[1],0,0
-      if isinstance(c1[0], (list, np.ndarray)):
-        # print("c1[0] is list")
-        [s1,s1j],[a1,a1j],[_,_] = c1
-      else:
-        # print("c1[0] is not list:", type(c1[0]))
-        s1,s1j,a1,a1j = c1[0],c1[1],0,0
-        # print("c:", c)
-        # print("c1:", c1)
-        # print("s,sj:",s,sj,", b,bj:",b,bj, ", s1,sij:", s1,s1j, ", a1,a1j:",a1,a1j)
-        seg = CubicBezier(
-          complex(s,sj),
-          complex(s+b,sj+bj),
-          complex(s1+a1,s1j+a1j),
-          complex(s1,s1j))
-        mysegs.append(seg)
-    except: # ValueError as err:
-      # print(err)
-      pass
-  if len(mysegs) <5:
-    # print("len(mysegs) is < 5")
-    return
-  p = Path(*mysegs)
-  NUM_SAMPLES = int(p.length())
-  my_path = []
-  for i in range(NUM_SAMPLES):
-    x = p.point(i/(NUM_SAMPLES-1))
-    my_path.append([x.real,x.imag])
-  return np.array(my_path)
-
-def download_microdraw_contours_as_polygons(
-  source,
-  project,
-  slice_index,
-  token,
-  width
-):
-  conts = download_all_regions_from_dataset_slice(source, project, slice_index, token)
-  if len(conts) == 0:
-    # print("len(conts) is 0")
-    return
-  polys = []
-  for i in range(len(conts)):
-    root = conts[i]["annotation"]["path"][1]
-
-    if "segments" in root:
-      poly = paperjs_path_to_polygon(np.array(root["segments"]))
-      if poly is not None:
-        poly = poly*width/1000 # scale to match image size
-        polys.append(poly)
-      # else:
-      #     print("segments poly is None")
-      #     print(poly)
-    if "children" in root:
-      for cont in root["children"]:
-        poly = paperjs_path_to_polygon(np.array(cont[1]["segments"]))
-        if poly is not None:
-          poly = poly*width/1000 # scale to match image size
-          polys.append(poly)
-        # else:
-        #   print("children poly is none")
-  return polys
-
 def save_slice_contours_in_svg(
   path,
   contours,
@@ -742,10 +767,8 @@ def register_manual_contours_to_mesh_contours_for_slice(
   if manual is None:
     # print("manual is None")
     return None, None, None
-  ve, veco, _, lines = slice_mesh(
-    v,
-    f,
-    (slice_index - slice_offset)*scale_x)
+  ve, veco, _, lines = slice_mesh(v, f,
+    (slice_index - slice_offset) * scale_x)
   if ve is None:
     return None, None, None
   ve = scale_contours_to_image(ve, width, height, scale_yz)
@@ -847,7 +870,7 @@ def compute_inner_contours_for_polygons(
   projection="maxcoupling",
   scale=1000,
   nodeinterval=10,
-  distCont=-3
+  dist_cont=-3
 ):
   return cic.compute_inner_contours_for_polygons(
     polygons,
@@ -855,7 +878,7 @@ def compute_inner_contours_for_polygons(
     projection=projection,
     scale=scale,
     nodeinterval=nodeinterval,
-    distCont=distCont)
+    dist_cont=dist_cont)
 
 def compute_inner_contour(
   coords_arr,
@@ -875,14 +898,16 @@ def compute_inner_contour(
   return subcontour
 
 def _compute_inner_polygon_iterative(
-  polygon,
+  poly,
   iterations,
-  distCont
+  dist_cont
 ):
   '''Compute inner polygon in steps'''
-  inner_polygon = polygon
+  inner_polygon = poly
   for _ in range(iterations):
-    inner_polygon = cOTT.computeInnerContour(inner_polygon, distCont)
+    inner_polygon = cOTT.computeInnerContour(
+      inner_polygon,
+      dist_cont)
   return inner_polygon
 
 def _resample_outer_and_inner_polygons(
