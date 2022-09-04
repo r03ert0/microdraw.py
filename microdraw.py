@@ -935,38 +935,23 @@ def find_contour_correspondences(
   '''
   malen = len(manual)
   aulen = len(auto)
-  m = np.ones((malen,aulen))*(-1)
+  m = np.ones((malen, aulen))*(-1)
 
-  for i in range(malen):
-    for j in range(aulen):
-      pola = Polygon(manual[i]).convex_hull
-      polb = Polygon(auto[j]).convex_hull
-      areaa = pola.area
-      areab = polb.area
-      areaaandb = pola.intersection(polb).area
-      areaaorb = pola.union(polb).area
+  if malen>5 and aulen>5:
+    for i in range(malen):
+      for j in range(aulen):
+        pola = Polygon(manual[i]).convex_hull
+        polb = Polygon(auto[j]).convex_hull
+        areaa = pola.area
+        areab = polb.area
+        areaaandb = pola.intersection(polb).area
+        areaaorb = pola.union(polb).area
 
-      overlap = areaaandb/areaaorb
-      if overlap < min_pct:
-        overlap = -1
-      m[i,j] = overlap
+        overlap = areaaandb/areaaorb
+        if overlap < min_pct:
+          overlap = -1
+        m[i,j] = overlap
 
-      # if areaaandb>0:
-      #     if ( areaa/areaaandb<min_pct
-      #         or areab/areaaandb<min_pct
-      #         or areaa/areaaandb>max_pct
-      #         or areab/areaaandb>max_pct ):
-      #         print(
-      #             areaa,
-      #             areab,
-      #             areaaandb,
-      #             areaa/areaaandb,
-      #             areab/areaaandb
-      #         )
-      #         areaaandb = -1
-      # else:
-      #     areaaandb = -1
-      # m[i,j] = areaaandb
   corresp = np.argmax(m.T,axis=0)
   for i,val in enumerate(corresp):
     if m[i,val] == -1:
