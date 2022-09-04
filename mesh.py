@@ -5,22 +5,50 @@ from scipy.spatial import distance_matrix
 def _interp(a, b, x):
   '''
   Obtain a vector between a and b at the position a[2]<=x<=b[2]
+
+  Parameters
+  ----------
+  a: array of shape (1, 3)
+  b: array of shape (1, 3)
+  x: float
+
+  Returns
+  -------
+  p: array of shape (1, 3)
+    A vector in between a and b
   '''
   l = b[2]-a[2]
   t = (x-a[2])/l
   p = a + t*(b-a)
-  return p,t
+  return p, t
 
 def raw_contour(v, f, x):
   '''
-  Obtain the contour produced by slicing the mesh with vertices v
-  and faces f at coordinate x in the last dimension. Produces a
-  list of vertices and a list of edges. The vertices for each
-  edge are unique which means that vertices at connecting edges
-  will be duplicated. Each vertex includes a reference to the
-  edge where it comes from. This reference contains the index
-  of the triangle, the number of the edge withing the triangle
-  (0, 1 or 2), and the distance from the beginning of the edge.
+  Obtain the contour produced by slicing the mesh with vertices v and faces f
+  at coordinate x in the last dimension. Produces a list of vertices and a
+  list of edges. The vertices for each edge are unique which means that
+  vertices at connecting edges will be duplicated. Each vertex includes a
+  reference to the edge where it comes from. This reference contains the index
+  of the triangle, the number of the edge withing the triangle (0, 1 or 2), and
+  the distance from the beginning of the edge.
+
+  Parameters
+  ----------
+  v: array of float with shape (, 3)
+    Mesh vertices
+  f: array of int with shape (, 3)
+    Mesh triangles
+  x: float
+    Position along the z-axis where to get a mesh slice
+  
+  Returns
+  -------
+  vert_point_and_coord: list of objects
+    Each object contains 2 elements: the vertex in space coordinates, and the
+    vertex in mesh-relative coordinates. Mesh relative coordinates contain 3
+    elements: triangle index, edge index, edge fraction
+  contour: array of int with shape (, 2)
+    Edges refering to vertices in vert_point_and_coord
   '''
   EPS = sys.float_info.epsilon
   contour = []
@@ -66,8 +94,22 @@ def raw_contour(v, f, x):
 def no_duplicates_contour(vert_point_and_coord, contour):
   '''
   Remove duplicate vertices from the contour given by vertices
-  `vert_point_and_coord` and edges in `contour`. The indices in
-  `contour` are re-indexed accordingly.
+  `vert_point_and_coord` and edges in `contour`. The indices in `contour` are
+  re-indexed accordingly.
+
+  Parameters
+  ----------
+  vert_point_and_coord: list of objects
+    List of vertices obtained from `raw_contours`. See below for a description.
+
+  Returns
+  -------
+  unique_vert_point_and_coord: list of objects
+    Each object contains 2 elements: the vertex in space coordinates, and the
+    vertex in mesh-relative coordinates. Mesh relative coordinates contain 3
+    elements: triangle index, edge index, edge fraction
+  contour: array of int with shape (, 2)
+    Edges refering to vertices in vert_point_and_coord
   '''
   # distance from each point to the others
   ver = np.zeros((len(vert_point_and_coord),3))
@@ -104,16 +146,26 @@ def continuous_contours(edge_soup):
   Obtain contiuous lines from the unordered list of edges
   in edge_soup. Returns an array of lines where each element is a
   continuous line composed of string of neighbouring vertices
+
+  Parameters
+  ----------
+  edge_soup: array of int with shape (, 2)
+    Unordered list of edges.
+
+  Returns
+  -------
+  lines: list of lists of int
+    List of lines
   '''
   co1=edge_soup.copy()
   lines = []
   while True:
     line = []
-    start = co1[0,0]
+    start = co1[0, 0]
     line.append(start)
     while True:
       found = 0
-      for i,(a,b) in enumerate(co1):
+      for i, (a, b) in enumerate(co1):
         if a == line[-1]:
           line.append(b)
           found = 1
@@ -121,7 +173,7 @@ def continuous_contours(edge_soup):
           line.append(a)
           found = 1
         if found:
-          co1 = np.delete(co1,i,0)
+          co1 = np.delete(co1, i, 0)
           break
       if found == 0:
         break
@@ -135,21 +187,40 @@ def continuous_contours(edge_soup):
 
 def slice_mesh(v, f, z, min_contour_length=10):
   '''
-  Slices the mesh of vertices v and faces f with the plane
-  of given z coordinate. Returns:
-  * unique_verts_point_and_coord: a list of unique vertices,
-  * mesh_relative_vertex_coords: their coordinates relative to the
-    mesh. Each row has 3 values: index of the mesh triangle that
-    was sliced, index of the edge within that triangle, position of
-    the vertex within that edge. The value of the position of the
-    vertex within the edge is 0 if the vertex is at the beginning of
-    the edge, and 1 if it is at the end.
-  * edges: a list of edges,
-  * lines: and a list of continuous lines.
+  Slices the mesh of vertices v and faces f with the plane of given z
+  coordinate.
+  
+  Parameters
+  ----------
+  v: array of float with shape (, 3)
+    Mesh vertices
+  f: array of int with shape (, 3)
+    Mesh triangles
+  z: float
+    Position along the z-axis where to obtain the mesh slice
+  min_contour_length: int
+    Minimum length in number of vertices of the polygons to retain.
+
+  Returns
+  -------
+  unique_verts: array of float with shape (, 3)
+    A list of unique vertices,
+  mesh_relative_vertex_coords: list of objects
+    The coordinates of `unique_verts` relative to the mesh. Each row has 3
+    values: index of the mesh triangle that was sliced, index of the edge
+    within that triangle, position of the vertex within that edge. The value of
+    the position of the vertex within the edge is 0 if the vertex is at the
+    beginning of the edge, and 1 if it is at the end.
+  edges: array of int with shape (, 2)
+    Polygon edges
+  lines: list of lists of int
+    List of continuous lines.
+  
+  [unreferenced]
   '''
   raw_verts, raw_cont = raw_contour(v, f, z)
   if len(raw_cont)<min_contour_length:
-      return None,None,None,None
+    return None,None,None,None
 
   unique_verts_point_and_coord, edges = no_duplicates_contour(raw_verts, raw_cont)
 
@@ -158,11 +229,31 @@ def slice_mesh(v, f, z, min_contour_length=10):
   unique_verts = np.zeros((len(unique_verts_point_and_coord),3))
   mesh_relative_vertex_coords = []
   for i in range(len(unique_verts_point_and_coord)):
-      unique_verts[i,:] = unique_verts_point_and_coord[i][0]
-      mesh_relative_vertex_coords.append(unique_verts_point_and_coord[i][1])
+    unique_verts[i,:] = unique_verts_point_and_coord[i][0]
+    mesh_relative_vertex_coords.append(unique_verts_point_and_coord[i][1])
   return unique_verts, mesh_relative_vertex_coords, edges, lines
 
-def scale_contours_to_image(v, width, height, scale_yz):
-  s = [[ve[0]/scale_yz,height-ve[1]/scale_yz] for ve in v]
-  return np.array(s)
+def scale_contours_to_image(verts, width, height, scale_yz):
+  '''Scale vertices in v to image space. The y-axis is inverted to match the
+  orientation of image pixels.
 
+  Parameters
+  ----------
+  verts: array of float with shape (, 3)
+    Vertices in mesh space. `scale_yz` converts them to svg space.
+  width: int
+    Slice image width
+  height: int
+    Slice image height
+  scale_yz: float
+    Scaling factor to convert mesh coordinates to svg coordinates
+
+  Returns
+  -------
+  scaled_verts: array of float with shape (, 3)
+    Vertices converted to slice image space
+
+  [unreferenced]
+  '''
+  scaled_verts = [[ve[0]/scale_yz, height-ve[1]/scale_yz] for ve in verts]
+  return np.array(scaled_verts)

@@ -1,3 +1,4 @@
+from email.policy import default
 from scipy.interpolate import splev, splrep
 import bezier
 import json
@@ -94,11 +95,15 @@ def curvesToCoordinates(edges): ### POTENTIAL BUG points not accessible
     return coords_arr.T
 
 def computeInnerContour(coords_arr, delta):
-    pco = pyclipper.PyclipperOffset()
-    pco.AddPath(coords_arr, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
-    ## compute "sub-curves"
-    subcontour = np.asarray(pco.Execute(delta)[0])
+  pco = pyclipper.PyclipperOffset()
+  pco.AddPath(coords_arr, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
+
+  ## compute "sub-curves"
+  tmp = pco.Execute(delta)
+  if len(tmp) > 0:
+    subcontour = np.asarray(tmp[0])
     return subcontour
+  return None
 
 def computeContourLength(data):
     l = 0

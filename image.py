@@ -10,20 +10,25 @@ from skimage.io import imread
 import subprocess as sp
 
 def get_dataset_description(source):
+  '''Get the JSON object describing the dataset at `source`
+
+  NOTE: This should be integrated in microdraw.py/download_dataset_definition
+  [web][io]
   '''
-  Get the JSON object describing the dataset at `source`
-  '''
+
   data = urllib.request.urlopen(source)
   return json.loads(data.read())
 
 def get_microdraw_slice_size(
   source,
   slice_index,
-  dataset_description = None):
+  dataset_description = None
+):
   '''Get the width and height of the slice. Values are obtained
   from the dzi xml file if that is provided, or from the width
   and height properties of the dictionary if the tileSource is
-  provided through a formula.'''
+  provided through a formula.
+  [web][io]'''
   if dataset_description is None:
     dataset_description = get_dataset_description(source)
 
@@ -46,11 +51,16 @@ def get_microdraw_slice_size(
   H = int(re.findall('Height="(\d+)"', txt)[0])
   return W, H
 
-def get_max_scale_levels(W, H):
+def get_max_scale_levels(
+  W,
+  H
+):
   '''Get the maximum scale level for a given image width and height'''
   return np.ceil(np.log2(np.max([W,H])))
     
-def get_nrows_ncols(W, H, scale_level, tile_size=2**8):
+def get_nrows_ncols(
+  W, H, scale_level, tile_size=2**8
+):
   '''Get the number of columns and rows at a given scale level'''
   max_levels = get_max_scale_levels(W, H)
   return (
@@ -58,15 +68,21 @@ def get_nrows_ncols(W, H, scale_level, tile_size=2**8):
     int(np.ceil(H/2**(max_levels-scale_level)/tile_size))
   )
 
-def _get_dzi_image_format(dzi_url):
-  '''returns the image format in which the dzi tiles are encoded'''
+def _get_dzi_image_format(
+  dzi_url
+):
+  '''Returns the image format in which the dzi tiles are encoded
+  [web]
+  '''
   res = urllib.request.urlopen(dzi_url).read()
   ext = [r[1] for r in [row.split("=") for row in str(res).split(" ")] if len(r)==2 and r[0]=="Format"][0].replace('"','')
   ext = ext.replace("\\n", "")
   return ext.strip(" \t\n\r")
 
 
-def _get_tile_from_function(tile_fn, l, row, col):
+def _get_tile_from_function(
+  tile_fn, l, row, col
+):
   tile_fn = sp.check_output([
     '/usr/local/bin/node',
     '-e',
@@ -78,8 +94,12 @@ def get_slice_image_array_at_scale_level(
   source,
   slice_index,
   scale_level,
-  dataset_description = None):
-  '''Download all images corresponding to a given scale level'''
+  dataset_description = None
+):
+  '''Download all images corresponding to a given scale level
+  [web]
+  '''
+
   if dataset_description is None:
     dataset_description = get_dataset_description(source)
   W, H = get_microdraw_slice_size(source, slice_index)
@@ -115,7 +135,9 @@ def get_slice_image_array_at_scale_level(
       images.append(row_arr)
   return  images
 
-def _get_concatenated_image_size(images):
+def _get_concatenated_image_size(
+  images
+):
   '''Get the size of a concatenated image'''
   shape = None
   row = 0
@@ -128,7 +150,9 @@ def _get_concatenated_image_size(images):
     shape[0] += images[row][0].shape[0]
   return shape
 
-def get_concatenated_image(images):
+def get_concatenated_image(
+  images
+):
   '''Concatenate all images in the image array'''
   shape = _get_concatenated_image_size(images)
   slice_image = np.zeros(shape, dtype="int")
@@ -152,8 +176,12 @@ def get_concatenated_image(images):
     offset_row += im.shape[0]
   return slice_image
 
-def get_slice_image(source, slice_index, scale_level):
-  '''Get the slice image for the given scale level'''
+def get_slice_image(
+  source, slice_index, scale_level
+):
+  '''Get the slice image for the given scale level
+  [unreferenced]
+  '''
   dataset_description = get_dataset_description(source)
   image_array = get_slice_image_array_at_scale_level(
     source,
