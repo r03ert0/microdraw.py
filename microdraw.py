@@ -571,7 +571,7 @@ def dataset_to_nifti(
   affine[0, 0] = voxdim[0]
   affine[1, 1] = voxdim[1]
   affine[2, 2] = voxdim[2]
-  return nib.Nifti1Image(img, affine=affine)
+  return nib.Nifti1Image(img.astype(np.int16), affine=affine)
 
 def save_dataset_as_nifti(
   dataset,
