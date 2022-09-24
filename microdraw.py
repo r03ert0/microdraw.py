@@ -546,7 +546,12 @@ def dataset_to_nifti(
   voxdim=[0.1, 0.1, 1.25],
   region_name=None
 ):
-  '''Convert dataset to nifti volume. Returns a nifti object
+  '''Convert dataset to nifti volume. Returns a nifti object.
+  In the xy plane, the size of the nifti volume fits the annotations.
+  In the z plane, there's as many voxels as there are slices in the
+  dataset.
+  The final volume has mm coordinates, transformed from the original
+  (svg, svg, slice) coordinates multiplying by voxdim.
   [conversion]'''
 
   verts, _ = dataset_as_volume(dataset)
@@ -571,7 +576,7 @@ def dataset_to_nifti(
   affine[0, 0] = voxdim[0]
   affine[1, 1] = voxdim[1]
   affine[2, 2] = voxdim[2]
-  return nib.Nifti1Image(img, affine=affine)
+  return nib.Nifti1Image(img.astype(np.int16), affine=affine)
 
 def save_dataset_as_nifti(
   dataset,
