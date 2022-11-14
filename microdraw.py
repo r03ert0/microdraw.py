@@ -770,7 +770,8 @@ def icp_step(
 
 def icp(
   ref,
-  mov
+  mov,
+  verbose=False
 ):
   '''Iterative closest point method to align two polygons
 
@@ -799,13 +800,15 @@ def icp(
     mov, dist = icp_step(ref, mov)
     if dist0<0:
       diff=dist
-      print("initial distance:", diff)
+      if verbose:
+        print("initial distance:", diff)
     else:
       diff=np.abs(dist-dist0)
     if diff<tol:
       break
     dist0=dist
-  print("final distance:", diff, "(after", i, "iterations)")
+  if verbose:
+    print("final distance:", diff, "(after", i, "iterations)")
   return mov, diff, i
 
 def icp_contours_step(
@@ -867,7 +870,8 @@ def icp_contours_step(
 
 def icp_contours(
   ref_contours,
-  mov_contours
+  mov_contours,
+  verbose=False
 ):
   '''Iterative closest point method to align two shapely multipolygons
 
@@ -896,13 +900,15 @@ def icp_contours(
     mov_contours, dist=icp_contours_step(ref_contours, mov_contours)
     if dist0<0:
       diff=dist
-      print("initial distance:", diff)
+      if verbose:
+        print("initial distance:", diff)
     else:
       diff=np.abs(dist-dist0)
     if diff<tol:
       break
     dist0=dist
-  print("final distance:", diff, "(after", i, "iterations)")
+  if verbose:
+    print("final distance:", diff, "(after", i, "iterations)")
 
   if np.isnan(diff):
     return None, None, None
@@ -1092,14 +1098,10 @@ def register_contours(
   mov_contours
  ):
 
-  '''If registration is not possible, the original data is returned'''
+  '''If registration is not possible, returns None'''
 
   # convert contours to multipolygon
   reg_contours, _, _ = icp_contours(ref_contours, mov_contours)
-
-  if reg_contours is None:
-    print("WARNING: Registration was not possible")
-    return mov_contours
 
   return reg_contours
 
