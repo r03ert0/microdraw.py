@@ -1,5 +1,5 @@
 bezier==2020.5.19
-certifi==2020.12.5
+certifi==2022.12.7
 cycler==0.10.0
 decorator==4.4.2
 distro==1.4.0
