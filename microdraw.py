@@ -827,7 +827,7 @@ def icp_contours_step(
   for poly in ref_contours:
     ref_pts.extend(poly.tolist())
   ref_pts = np.array(ref_pts)
-  
+
   M = distance_matrix(ref_pts, mov_pts)
   closest_ref = np.argmin(M, axis=0)
   out = ref_pts[closest_ref]
@@ -892,6 +892,10 @@ def icp_contours(
     Number of iterations
   [registration]
   '''
+
+  if len(ref_contours) == 0:
+    print("WARNING: No reference contour")
+    return mov_contours, None, None
 
   maxiter=100
   tol=1e-6
