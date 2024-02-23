@@ -137,7 +137,7 @@ def no_duplicates_contour(vert_point_and_coord, contour):
 
   # re-index the edges to refer to the new list of unique vertices
   for i in range(len(contour)):
-    contour[i] = (lut[contour[i,0]], lut[contour[i,1]])
+    contour[i] = (lut[contour[i, 0]], lut[contour[i, 1]])
   
   return (unique_vert_point_and_coord, contour)
 
